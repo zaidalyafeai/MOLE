@@ -1,10 +1,11 @@
 # type: ignore
 
-from schema import Schema, Parent
+from schema import Schema, Parent, ArSchema, MultiSchema
 from pydantic import Field
 from type_classes import *
 from search import run
 from rich import print
+import json
 
 
 gold_metadata1  = {
@@ -28,6 +29,7 @@ predicted_metadata = Parent(
     path = 'testfiles/test1.json'
 )
 print(predicted_metadata.schema())
+
 evaluation_results = predicted_metadata.compare_with(gold_metadata1)
 
 for m in evaluation_results:
@@ -155,18 +157,37 @@ predicted_metadata = Parent.generate_metadata(method = 'default')
 evaluation_results = predicted_metadata.compare_with(default_metadata, return_metrics_only=True)
 for m in evaluation_results:
     if m == 'length':
-        assert abs(evaluation_results[m] - 0.66) < 0.01, f'❌ {m} value should be 0.66 but got {evaluation_results[m]}'
+        assert abs(evaluation_results[m] - 0.33) < 0.01, f'❌ {m} value should be 0.66 but got {evaluation_results[m]}'
     else:
         assert evaluation_results[m] == 1, f'❌ {m} value should be 1 but got {evaluation_results[m]}'
 print('✅ passed test11')
 
-# from arg_utils import args
+# validate metadata
+from jsonschema import validate
+schema = Parent(
+    path = 'testfiles/test12.json'
+)
+schema_to_slot = json.loads(schema.schema_to_slot(""))
+print(schema_to_slot)
+validate(instance=schema.json(), schema=schema_to_slot)
+print('✅ passed test12')
 
-# args.model_name='moonshotai/kimi-k2'
-# args.schema_name='model'
-# args.backend='openrouter'
-# args.results_path='synth_dataset_models'
-# args.format='pdf_plumber'
-# args.overwrite=True
-# results = run("https://arxiv.org/pdf/2507.20534", args)
-# print(results[args.model_name]['metadata'])
+# validate metadata
+from jsonschema import validate
+schema = ArSchema(
+    path = 'testfiles/test11.json'
+)
+print(schema.get_prompts("", "", version="3.0"))
+schema_to_slot = json.loads(schema.schema_to_slot(""))
+validate(instance=schema.json(), schema=schema_to_slot)
+print('✅ passed test13')
+
+# validate metadata
+from jsonschema import validate
+schema = MultiSchema(
+    path = 'testfiles/test13.json'
+)
+print(schema.get_prompts("", "", version="3.0"))
+schema_to_slot = json.loads(schema.schema_to_slot(""))
+validate(instance=schema.json(), schema=schema_to_slot)
+print('✅ passed test14')

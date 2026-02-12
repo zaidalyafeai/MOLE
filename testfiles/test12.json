@@ -3,6 +3,9 @@
     "Age": 20,
     "Website": "https://www.google.com",
     "Hobbies": ["reading", "swimming", "coding"],
-    "Sons": [ "khalid" ],
+    "Sons": [{
+        "Name": "khalid",
+        "Age": 10
+    }],
     "Married": true
 }
