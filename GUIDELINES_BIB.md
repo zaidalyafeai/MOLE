@@ -9,4 +9,3 @@ In this task we want to extract metadata from wiki pages. Here is a discribtion 
 6. **Field**: the fields of study of the person
 7. **Description**: a short description of the person career
 8. **Awards**: the list of awards won by the person
-
