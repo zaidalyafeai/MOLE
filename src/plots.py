@@ -188,7 +188,7 @@ def get_group():
     elif args.group_by_x == "error":
         headers += ["error"]
     elif args.group_by_x == "version":
-        headers += ["1.0", "2.0"]
+        headers += ["1.0", "2.0", "3.0"]
     else:
         headers += args.group_by_x.split(",")
     return headers
