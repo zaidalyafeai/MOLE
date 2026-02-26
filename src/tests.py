@@ -1,6 +1,6 @@
 # type: ignore
 
-from schema import Schema, Parent, ArSchema, MultiSchema
+from schema import Schema, Parent, ArSchema, MultiSchema, get_schema
 from pydantic import Field
 from type_classes import *
 from search import run
@@ -191,3 +191,41 @@ print(schema.get_prompts("", "", version="3.0"))
 schema_to_slot = json.loads(schema.schema_to_slot(""))
 validate(instance=schema.json(), schema=schema_to_slot)
 print('✅ passed test14')
+
+import json
+with open("testfiles/test14.json", "r") as f:
+    schema = json.load(f)  # Execute to create the class
+
+CustomSchema = get_schema(schema = schema)
+print(CustomSchema.get_schema_from_version(version = "2.0"))
+print(CustomSchema.generate_metadata(method = 'default').json())
+
+gold_metadata  = {
+    "Name": "ahmad",
+    "Age": 20,
+    "Hobbies": ["reading"],
+    'Married': True,
+    "Sons":[],
+    "annotations_from_paper": {
+        "Name": 1,
+        "Age": 1,
+        "Website": 1,
+        "Hobbies": 1,
+        "Sons": 1,
+        "Married": 1
+    }
+}
+
+predicted_metadata = CustomSchema(
+    metadata = {
+        "Name": "ahmad",
+        "Age": 20,
+        "Hobbies": ["reading"],
+        'Married': True,
+        "Sons":[],
+    }
+)
+print(predicted_metadata.schema())
+
+evaluation_results = predicted_metadata.compare_with(gold_metadata)
+print(evaluation_results)

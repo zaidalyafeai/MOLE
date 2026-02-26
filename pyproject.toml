@@ -13,6 +13,7 @@ dependencies = [
     "datasets>=4.1.1",
     "docling~=2.30",
     "fastapi==0.115.12",
+    "jsonschema>=4.25.0",
     "langextract>=1.0.8",
     "levenshtein==0.27.1",
     "litellm==1.65.4.post1",
@@ -28,6 +29,7 @@ dependencies = [
     "trl>=0.21.0",
     "uvicorn==0.34.2",
     "vllm>=0.10.1",
+    "wandb>=0.25.0",
     "wikipedia-api>=0.8.1",
 ]
 

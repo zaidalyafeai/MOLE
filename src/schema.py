@@ -72,6 +72,63 @@ class Schema(BaseModel):
         return json.dumps(schema_json, indent=4)
     
     @classmethod
+    def get_schema_from_version(cls, version, length_constrain = "low", guidelines = ""):
+        if version == "3.0":
+            schema = cls.schema_to_slot(guidelines)
+        elif version == "2.0":
+            schema = cls.schema(length_constrain = length_constrain)
+        elif version == "1.0":
+            schema = cls.get_mole_schema()
+        else:
+            raise ValueError(f"Invalid version: {version}")
+        return schema
+    
+    @classmethod
+    def get_prompt(cls, paper_text, readme = "", schema = {}, metadata = ""):
+        if not isinstance(schema, str):
+            schema = json.dumps(schema)
+            
+        if readme != "":
+            prompt = f"""
+                    You have the following Metadata: {metadata} extracted from a paper and the following Readme: {readme}
+                    Given the following Input schema: {schema}, then update the metadata in the Input schema with the information from the readme.
+                    """
+        else:  
+            prompt = f"""Schema Name: {cls.get_schema_name()}
+                        Input Schema: {schema}
+                        Paper Text: {paper_text}
+                    """
+        return prompt
+
+    @classmethod
+    def get_guidelines_from_schema(cls, schema):
+        guidelines = ""
+        for key in schema:
+            if "description" in schema[key]:
+                guidelines += f"**{key}**: {schema[key]['description']} \n"
+        
+        return guidelines
+            
+    @classmethod
+    def get_prompts_from_schema(cls, paper_text, readme, schema, version = "2.0", metadata = None):
+        # print("schema", schema)
+        guidelines = cls.get_guidelines_from_schema(schema)
+        prompt = cls.get_prompt(paper_text, readme, schema, metadata) 
+        system_prompt = cls.get_system_prompt(version = version, guidelines = guidelines) 
+        return prompt, system_prompt 
+    
+    @classmethod
+    def get_descriptions(cls, guidelines):
+        guidelines = "\n".join(guidelines.split("\n")[2:]).strip()
+        description = {}
+        for guideline in guidelines.split("\n"):
+            value = guideline.split("**")[-1].replace(":", "").strip()
+            key = guideline.split("**")[1]
+            description[key] = value
+        return description
+
+
+    @classmethod
     def schema_to_template(cls):
         # https://github.com/numindai/nuextract/tree/main
         type_mapper = {
@@ -111,6 +168,75 @@ class Schema(BaseModel):
                 template[key] = [results]
                     
         return json.dumps(template, indent=4)
+    
+    @classmethod
+    def schema_to_slot(cls, guidelines = ""):
+        schema_json = json.loads(cls.schema())
+        type_mapper = {
+            "str": "string",
+            "int": "integer",
+            "float": "number",
+            "url": "string",
+            "year": "integer",
+            "bool": "boolean"
+        }
+        if guidelines != "":
+            descriptions = cls.get_descriptions(guidelines)
+        else:
+            descriptions = {}
+        properties = {}
+        for key in schema_json.keys():
+            type = schema_json[key]['answer_type']
+                
+            if type == 'list[str]':
+                properties[key] = {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            elif 'list[dict' in type:
+                columns = type.split('dict[')[1].split(']')[0].split(',')
+                columns = [column.strip() for column in columns]
+                object_type = {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {}
+                    }
+                }
+                for column in columns:
+                    if column in schema_json:
+                        column_type = schema_json[column]['answer_type']
+                        if column_type == 'list[str]':
+                            object_type["items"]["properties"][column] = { # don't allow complex data types inside objects, this is a result of ill-defined Lanuage in the MultiSchema.
+                                "type": "string",
+                            }
+                        else:
+                            object_type["items"]["properties"][column] = {
+                                "type": type_mapper[column_type]
+                            }
+
+                properties[key] = object_type
+            else:
+                properties[key] = {
+                    "type": type_mapper[type]
+                }
+            
+            if 'options' in schema_json[key]:
+                if "items" in properties[key]:
+                    properties[key]["items"]["enum"] = schema_json[key]['options']
+                else:
+                    properties[key]["enum"] = schema_json[key]['options']
+            if key in descriptions:
+                properties[key]["description"] = descriptions[key]
+                
+        output_json = {
+            "type": "object",
+            "properties": properties
+        }            
+        return json.dumps(output_json, indent=4)
+    
     
     @classmethod
     def get_mole_schema(cls):
@@ -179,19 +305,36 @@ class Schema(BaseModel):
         return type.get_default()
 
     @classmethod
-    def get_system_prompt(self):
-        return f"""
-            You are a professional metadata extractor of datasets from research papers. 
-            You will be provided 'Paper Text', 'Schema Name', 'Input Schema' and you must respond with an 'Output JSON'.
-            The 'Output JSON' is a JSON with key:answer where the answer retrieves an attribute of the 'Input Schema' from the 'Paper Text'. 
-            Each attribute in the 'Input Schema' has the following fields:
-            'options' : If the attribute has 'options' then the answer must be at least one of the options.
-            'answer_type': The output type represents the type of the answer.
-            'answer_min' : The minimum length of the answer depending on the 'answer_type'.
-            'answer_max' : The maximum length of the answer depending on the 'answer_type'.
-            The 'Output JSON' is a JSON that can be parsed using Python `json.load()`. USE double quotes "" not single quotes '' for the keys and values.
-            The 'Output JSON' must have ONLY the keys in the 'Input Schema'.
-        """
+    def get_system_prompt(cls, version = "2.0", guidelines = None):
+        if version == "3.0":
+            system_prompt = f"""
+                You are a professional metadata extractor of datasets from research papers. 
+                You will be provided 'Paper Text', 'Schema Name', 'Input Schema' and you must respond with an 'Output JSON'.
+                The 'Output JSON' is a JSON with key:answer where the answer retrieves an attribute of the 'Input Schema' from the 'Paper Text'. 
+                Each attribute in the 'Input Schema' has the following fields:
+                - "type": The return type of the attribute, which is a value from [string, number, integer, list, boolean, object, array, null]
+                - "description": A description of the attribute
+                - "enum" (optional): A list of possible values for the attribute.
+                The 'Output JSON' is a JSON that can be parsed using Python `json.load()`. USE double quotes "" not single quotes '' for the keys and values.
+                The 'Output JSON' must have ONLY the keys in the 'Input Schema'.
+            """
+        else:
+            system_prompt = f"""
+                You are a professional metadata extractor of datasets from research papers. 
+                You will be provided 'Paper Text', 'Schema Name', 'Input Schema' and you must respond with an 'Output JSON'.
+                The 'Output JSON' is a JSON with key:answer where the answer retrieves an attribute of the 'Input Schema' from the 'Paper Text'. 
+                Each attribute in the 'Input Schema' has the following fields:
+                'options' : If the attribute has 'options' then the answer must be at least one of the options.
+                'answer_type': The output type represents the type of the answer.
+                'answer_min' : The minimum length of the answer depending on the 'answer_type'.
+                'answer_max' : The maximum length of the answer depending on the 'answer_type'.
+                The 'Output JSON' is a JSON that can be parsed using Python `json.load()`. USE double quotes "" not single quotes '' for the keys and values.
+                The 'Output JSON' must have ONLY the keys in the 'Input Schema'.
+            """
+        if version == "2.0":
+            system_prompt += "Use the following guidelines to extract the answer from the 'Paper Text':\n\n"
+            system_prompt += guidelines
+        return system_prompt
         
     def evaluate_length(self, length_constrain = "low"):
         accuracy = 0
@@ -299,27 +442,10 @@ class Schema(BaseModel):
 class DatasetSchema(Schema):
     @classmethod
     def get_prompts(cls, paper_text, readme, metadata = None, version = "2.0", length_constrain = "low"):
-        if version == "2.0":
-            schema = cls.schema(length_constrain = length_constrain)
-        elif version == "1.0":
-            schema = cls.get_mole_schema()
-        else:
-            raise ValueError(f"Invalid version: {version}")
-        if readme != "":
-            prompt = f"""
-                    You have the following Metadata: {metadata} extracted from a paper and the following Readme: {readme}
-                    Given the following Input schema: {schema}, then update the metadata in the Input schema with the information from the readme.
-                    """
-        else:  
-            prompt = f"""Schema Name: {cls.get_schema_name()}
-                        Input Schema: {schema}
-                        Paper Text: {paper_text}
-                    """
-        system_prompt = cls.get_system_prompt()
-        if version == "2.0":
-            system_prompt += "Use the following guidelines to extract the answer from the 'Paper Text':\n\n"
-            system_prompt += open('GUIDELINES.md').read()
-
+        guidelines = open('GUIDELINES.md').read()
+        schema = cls.get_schema_from_version(version, length_constrain, guidelines)
+        prompt = cls.get_prompt(paper_text, readme, schema, metadata) 
+        system_prompt = cls.get_system_prompt(version = version, guidelines = guidelines) 
         return prompt, system_prompt
 
 class Model(Schema):
@@ -344,20 +470,10 @@ class ModelSchema(Model):
     
     @classmethod
     def get_prompts(cls, paper_text, readme, metadata = None, version = "2.0", length_constrain = "low"):
-        if version == "2.0":
-            schema = cls.schema(length_constrain = length_constrain)
-        elif version == "1.0":
-            schema = cls.get_mole_schema()
-        else:
-            raise ValueError(f"Invalid version: {version}")
-        prompt = f"""Schema Name: {cls.get_schema_name()}
-                    Input Schema: {schema}
-                    Paper Text: {paper_text}
-                """
-        system_prompt = cls.get_system_prompt().replace("datasets", "models")
-        if version == "2.0":
-            system_prompt += "Use the following guidelines to extract the answer from the 'Paper Text':\n\n"
-            system_prompt += open('GUIDELINES_MODEL.md').read()
+        guidelines = open('GUIDELINES_MODEL.md').read()
+        schema = cls.get_schema_from_version(version, length_constrain, guidelines)
+        prompt = cls.get_prompt(paper_text = paper_text, readme = readme, schema = schema)
+        system_prompt = cls.get_system_prompt(version = version, guidelines = guidelines).replace("datasets", "models")
         return prompt, system_prompt
 
 class ToolSchema(Schema):
@@ -380,20 +496,10 @@ class ToolSchema(Schema):
     
     @classmethod
     def get_prompts(cls, paper_text, readme, metadata = None, version = "2.0", length_constrain = "low"):
-        if version == "2.0":
-            schema = cls.schema(length_constrain = length_constrain)
-        elif version == "1.0":
-            schema = cls.get_mole_schema()
-        else:
-            raise ValueError(f"Invalid version: {version}")
-        prompt = f"""Schema Name: {cls.get_schema_name()}
-                    Input Schema: {schema}
-                    Paper Text: {paper_text}
-                """
-        system_prompt = cls.get_system_prompt().replace("datasets", "tools")
-        if version == "2.0":
-            system_prompt += "Use the following guidelines to extract the answer from the 'Paper Text':\n\n"
-            system_prompt += open('GUIDELINES_TOOL.md').read()
+        guidelines = open('GUIDELINES_TOOL.md').read()
+        schema = cls.get_schema_from_version(version, length_constrain, guidelines)
+        prompt = cls.get_prompt(paper_text = paper_text, readme = readme, schema = schema)
+        system_prompt = cls.get_system_prompt(version = version, guidelines = guidelines).replace("datasets", "tools")
         return prompt, system_prompt
 
 class MsedSchema(Schema):
@@ -409,20 +515,10 @@ class MsedSchema(Schema):
     
     @classmethod
     def get_prompts(cls, paper_text, readme, metadata = None, version = "2.0", length_constrain = "low"):
-        if version == "2.0":
-            schema = cls.schema(length_constrain = length_constrain)
-        elif version == "1.0":
-            schema = cls.get_mole_schema()
-        else:
-            raise ValueError(f"Invalid version: {version}")
-        prompt = f"""Schema Name: {cls.get_schema_name()}
-                    Input Schema: {schema}
-                    Paper Text: {paper_text}
-                """
-        system_prompt = cls.get_system_prompt().replace("of datasets", "")
-        if version == "2.0":
-            system_prompt += "Use the following guidelines to extract the answer from the 'Paper Text':\n\n"
-            system_prompt += open('GUIDELINES_MSED.md').read()
+        guidelines = open('GUIDELINES_MSED.md').read()
+        schema = cls.get_schema_from_version(version, length_constrain, guidelines)
+        prompt = cls.get_prompt(paper_text = paper_text, readme = readme, schema = schema)
+        system_prompt = cls.get_system_prompt(version = version, guidelines = guidelines).replace("of datasets", "")
         return prompt, system_prompt
 
 class S2ORCSchema(Schema):
@@ -435,20 +531,10 @@ class S2ORCSchema(Schema):
     
     @classmethod
     def get_prompts(cls, paper_text, readme, metadata = None, version = "2.0", length_constrain = "low"):
-        if version == "2.0":
-            schema = cls.schema(length_constrain = length_constrain)
-        elif version == "1.0":
-            schema = cls.get_mole_schema()
-        else:
-            raise ValueError(f"Invalid version: {version}")
-        prompt = f"""Schema Name: {cls.get_schema_name()}
-                    Input Schema: {schema}
-                    Paper Text: {paper_text}
-                """
-        system_prompt = cls.get_system_prompt().replace("of datasets", "")
-        if version == "2.0":
-            system_prompt += "Use the following guidelines to extract the answer from the 'Paper Text':\n\n"
-            system_prompt += open('GUIDELINES_S2ORC.md').read()
+        guidelines = open('GUIDELINES_S2ORC.md').read()
+        schema = cls.get_schema_from_version(version, length_constrain, guidelines)
+        prompt = cls.get_prompt(paper_text = paper_text, readme = readme, schema = schema)
+        system_prompt = cls.get_system_prompt(version = version, guidelines = guidelines).replace("of datasets", "")
         return prompt, system_prompt
 
 class BIBSchema(Schema):
@@ -464,20 +550,10 @@ class BIBSchema(Schema):
     
     @classmethod
     def get_prompts(cls, paper_text, readme, metadata = None, version = "2.0", length_constrain = "low"):
-        if version == "2.0":
-            schema = cls.schema(length_constrain = length_constrain)
-        elif version == "1.0":
-            schema = cls.get_mole_schema()
-        else:
-            raise ValueError(f"Invalid version: {version}")
-        prompt = f"""Schema Name: {cls.get_schema_name()}
-                    Input Schema: {schema}
-                    Paper Text: {paper_text}
-                """
-        system_prompt = cls.get_system_prompt().replace("of datasets", "")
-        if version == "2.0":
-            system_prompt += "Use the following guidelines to extract the answer from the 'Paper Text':\n\n"
-            system_prompt += open('GUIDELINES_BIB.md').read()
+        guidelines = open('GUIDELINES_BIB.md').read()
+        schema = cls.get_schema_from_version(version, length_constrain, guidelines)
+        prompt = cls.get_prompt(paper_text = paper_text, readme = readme, schema = schema)
+        system_prompt = cls.get_system_prompt(version = version, guidelines = guidelines).replace("of datasets", "")
         return prompt, system_prompt
 
 class NADLSchema(Schema):
@@ -488,20 +564,10 @@ class NADLSchema(Schema):
     
     @classmethod
     def get_prompts(cls, paper_text, readme, metadata = None, version = "2.0", length_constrain = "low"):
-        if version == "2.0":
-            schema = cls.schema(length_constrain = length_constrain)
-        elif version == "1.0":
-            schema = cls.get_mole_schema()
-        else:
-            raise ValueError(f"Invalid version: {version}")
-        prompt = f"""Schema Name: {cls.get_schema_name()}
-                    Input Schema: {schema}
-                    Paper Text: {paper_text}
-                """
-        system_prompt = cls.get_system_prompt().replace("of datasets", "")
-        if version == "2.0":
-            system_prompt += "Use the following guidelines to extract the answer from the 'Paper Text':\n\n"
-            system_prompt += open('GUIDELINES_NADL.md').read()
+        guidelines = open('GUIDELINES_NADL.md').read()
+        schema = cls.get_schema_from_version(version, length_constrain, guidelines)
+        prompt = cls.get_prompt(paper_text = paper_text, readme = readme, schema = schema)
+        system_prompt = cls.get_system_prompt(version = version, guidelines = guidelines).replace("of datasets", "")
         return prompt, system_prompt
 
 
@@ -512,11 +578,8 @@ class TestSchema(Schema):
 
     @classmethod
     def get_prompts(cls, paper_text, readme, metadata = None, version = "2.0", length_constrain = "low"):
-        schema = cls.schema(length_constrain = length_constrain)
-        prompt = f"""Schema Name: {cls.get_schema_name()}
-                    Input Schema: {schema}
-                    Text: {paper_text}
-                """
+        schema = cls.get_schema_from_version(version, length_constrain)
+        prompt = cls.get_prompt(paper_text = paper_text, readme = readme, schema = schema)
         system_prompt = """You are a professional metadata extractor from a given Text. 
             You will be provided 'Text', 'Schema Name', 'Input Schema' and you must respond with an 'Output JSON'.
             The 'Output JSON' is a JSON with key:answer where the answer retrieves an attribute of the 'Input Schema' from the 'Paper Text'. 
@@ -541,11 +604,8 @@ class ResourceSchema(Schema):
     
     @classmethod
     def get_prompts(cls, paper_text, readme, metadata = None, version = "2.0", length_constrain = "low"):
-        
-        prompt = f"""Schema Name: {cls.get_schema_name()}
-                    Input Schema: {cls.schema(length_constrain = length_constrain)}
-                    Paper Text: {paper_text}
-                """
+        schema = cls.get_schema_from_version(version, length_constrain)
+        prompt = cls.get_prompt(paper_text = paper_text, readme = readme, schema = schema)
         system_prompt = f"""
         You are a professional metadata extractor of resources from research papers. 
         You will be provided 'Paper Text', 'Schema Name', 'Input Schema' and you must respond with an 'Output JSON'.
@@ -646,7 +706,106 @@ class Parent(Person):
     Married: Field(Bool, 1, 1)
     Sons: Field(List[Person], 0, 3)
 
-def get_schema(schema_name):
+import json
+from typing import Dict, Any, List
+from schema import Schema
+from type_classes import Field, Str, Int, Bool, List, URL, Year, Float
+
+def infer_field_type(key: str, value: Any):
+    type = value["type"]
+    """Infer field type from JSON value and sample data"""
+
+    if type == "string":
+        if "enum" in value:
+            return f"Field(Str, 1, 5, {value['enum']})"
+        else:
+            return f"Field(Str, 1, 5)"
+    elif type == "boolean":
+        return f"Field(Bool, 1, 1)"
+    elif type == "integer":
+        return f"Field(Int, 1, 1000)"
+    elif type == "number":
+        return f"Field(Float, 0, 1000000)"
+    if type == "object":
+        if "properties" in value:
+            # This is a nested object - create a nested schema
+            nested_class_name = key.capitalize() + "Schema"
+            return f"Field({nested_class_name}, 1, 1)"
+        else:
+            return f"Field(Str, 1, 5)"  # fallback
+    elif type == "array":
+        if "items" in value:
+            value = value["items"]
+            list_type = infer_field_type(key, value).split("(")[1].split(",")[0]
+            return f"Field(List[{list_type}], 0, 10)"
+        if "items" in value and value["items"].get("type") == "object":
+            # List of objects
+            nested_class_name = key.capitalize() + "Schema"
+            return f"Field(List[{nested_class_name}], 0, 10)"
+def generate_schema_from_json(data: dict, class_name: str):
+    """Generate a schema class from JSON file"""
+    
+    fields = []
+    nested_classes = {}  # Use dict to avoid duplicates
+    
+    def create_nested_class(key: str, schema_def: dict) -> str:
+        """Create a nested class definition from schema"""
+        nested_class_name = key.capitalize()
+        
+        if nested_class_name in nested_classes:
+            return nested_class_name
+        
+        # Extract properties from the object schema
+        if "properties" in schema_def:
+            nested_fields = []
+            for prop_key, prop_value in schema_def["properties"].items():
+                # Check if this property is also a nested object
+                if prop_value.get("type") == "object":
+                    sub_class_name = create_nested_class(f"{nested_class_name}{prop_key.capitalize()}", prop_value)
+                    nested_fields.append(f"    {prop_key}: Field({sub_class_name}, 1, 1)")
+                elif prop_value.get("type") == "array" and prop_value.get("items", {}).get("type") == "object":
+                    sub_class_name = create_nested_class(f"{nested_class_name}{prop_key.capitalize()}", prop_value["items"])
+                    nested_fields.append(f"    {prop_key}: Field(List[{sub_class_name}], 0, 10)")
+                else:
+                    field_def = infer_field_type(prop_key, prop_value)
+                    nested_fields.append(f"    {prop_key}: {field_def}")
+            
+            nested_class_code = f"class {nested_class_name}(Schema):\n" + "\n".join(nested_fields)
+            nested_classes[nested_class_name] = nested_class_code
+        
+        return nested_class_name
+    
+    # Process all fields
+    for key, value in data.items():
+        # Check if this is a nested object
+        if value.get("type") == "object":
+            nested_class_name = create_nested_class(key, value)
+            fields.append(f"    {key}: Field({nested_class_name}, 1, 1)")
+        
+        # Check if this is an array of objects
+        elif value.get("type") == "array" and value.get("items", {}).get("type") == "object":
+            nested_class_name = create_nested_class(key, value["items"])
+            fields.append(f"    {key}: Field(List[{nested_class_name}], 0, 10)")
+        
+        # Regular field
+        else:
+            field_def = infer_field_type(key, value)
+            fields.append(f"    {key}: {field_def}")
+    
+    # Generate the complete schema class
+    nested_classes_code = "\n\n".join(nested_classes.values())
+    
+    schema_code = f"""
+from schema import Schema 
+from type_classes import Field, Str, Int, Bool, List, URL, Year, Float
+{nested_classes_code}
+class {class_name}(Schema):
+{chr(10).join(fields)}
+"""
+    
+    return schema_code
+
+def get_schema(schema_name = "", schema = None):
     if schema_name == 'ar':
         return ArSchema
     elif schema_name == 'en':
@@ -677,5 +836,11 @@ def get_schema(schema_name):
         return Parent
     elif schema_name == 'nadl':
         return NADLSchema
+    elif schema is not None:
+        schema_code = generate_schema_from_json(schema, 'CustomSchema')
+        namespace = {}
+        exec(schema_code, namespace)
+        return namespace['CustomSchema']
+
     else:
         raise ValueError(f"Invalid schema name: {schema_name}")

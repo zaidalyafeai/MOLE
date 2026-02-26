@@ -11,7 +11,7 @@ from openai import OpenAI
 from utils import read_json, get_metadata_human, create_hash, get_metadata_judge, get_repo_link, fetch_repository_metadata, TextLogger, get_paper_content_from_docling
 from traditional import get_metadata_keyword, get_metadata_qa, get_metadata_langextract
 from schema import get_schema
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from search_acl import ACLDownloader, Downloader
 
 load_dotenv()
@@ -82,7 +82,7 @@ def get_metadata(
     readme="",
     metadata={},
     use_search=False,
-    schema_name="ar",
+    schema_name=None,
     use_cot=True,
     few_shot = 0,
     max_retries = 3,
@@ -92,7 +92,8 @@ def get_metadata(
     timeout = 3,
     version = "2.0",
     log = True,
-    length_constrain = "low"
+    length_constrain = "low",
+    schema_json = None,
 ):
     cost = {
         "input_tokens": 0,
@@ -100,11 +101,15 @@ def get_metadata(
         "cost": 0,
     }
     logger = TextLogger(log = log)
-    schema = get_schema(schema_name)
+    schema = get_schema(schema_name, schema = schema_json)
+
     for i in range(max_retries):
         predictions = {}
         error = None
-        prompt, sys_prompt = schema.get_prompts(paper_text, readme, metadata, version = version, length_constrain = length_constrain)
+        if schema_name is None:
+            prompt, sys_prompt = schema.get_prompts_from_schema(paper_text, readme,  schema_json, version = version)
+        else:
+            prompt, sys_prompt = schema.get_prompts(paper_text, readme, metadata, version = version, length_constrain = length_constrain)
         messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}]
 
         
@@ -118,7 +123,7 @@ def get_metadata(
             )
         elif backend == "vllm":
             if model_name == "MOLE":
-                model_name = "Qwen2.5-3B-Instruct"
+                model_name = "Qwen/Qwen2.5-3B-Instruct"
             tokenizer = AutoTokenizer.from_pretrained(model_name)
             # Support custom base URL from environment variable for SLURM jobs
             base_url = "http://localhost:8787/v1"
@@ -129,6 +134,36 @@ def get_metadata(
             logger.show_info(f"🔑 Using VLLM backend")
             prompt = truncate_prompt(prompt, sys_prompt, tokenizer, max_model_len, max_output_len = max_output_len, log = log)
             messages[1]["content"] = prompt
+        elif backend == "transformers":
+
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype="auto",
+                device_map="auto"
+            )
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+            prompt = truncate_prompt(prompt, sys_prompt, tokenizer, max_model_len, max_output_len = max_output_len, log = log)
+            messages = [
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": prompt}
+            ]
+            text = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+            model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+
+            generated_ids = model.generate(
+                **model_inputs,
+                max_new_tokens=512
+            )
+            generated_ids = [
+                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+            ]
+
+            response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
         else:
             raise ValueError(f"Invalid backend: {backend}")
 
@@ -151,6 +186,9 @@ def get_metadata(
                             "chat_template_kwargs": {"enable_thinking": False},
                         }
                     )
+            elif backend == "transformers":
+                # Do nothing, already handled above
+                pass
             else:
                 message = client.chat.completions.create(
                         model=model_name,
@@ -165,7 +203,11 @@ def get_metadata(
                     "input_tokens": 0,
                     "output_tokens": 0,
                 }
-            response =  message.choices[0].message.content
+            if backend == "transformers":
+                response = response
+                message = None
+            else:
+                response =  message.choices[0].message.content
             predictions = read_json(response)
         except json.JSONDecodeError as e:
             error = str(e)
@@ -196,6 +238,8 @@ def extract_paper_text(path, format = "pdf_plumber", use_cached_docling=True, lo
     logger = TextLogger(log = log)
     if format == "tex":
         source_files = glob(f"{path}/**/**.tex", recursive=True)
+    elif format == "text":
+        source_files = glob(f"{path}/**/paper_text.txt", recursive=True)
     else:
         source_files = glob(f"{path}/**/paper.pdf", recursive=True)
 
@@ -211,6 +255,8 @@ def extract_paper_text(path, format = "pdf_plumber", use_cached_docling=True, lo
     paper_text = ""
     for source_file in source_files:
         if source_file.endswith(".tex"):
+            paper_text += open(source_file, "r").read()
+        elif source_file.endswith(".txt"):
             paper_text += open(source_file, "r").read()
         elif source_file.endswith(".pdf"):
             if format == "pdf_plumber" or format == "tex":
