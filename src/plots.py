@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 from plot_utils import get_max_per_row
 args = argparse.ArgumentParser()
-args.add_argument("--split", type=str, default="valid")
+args.add_argument("--split", type=str, default="test")
 args.add_argument("--year", action="store_true")
 args.add_argument("--cost", action="store_true")
 args.add_argument("--model", type=str, default=None)
