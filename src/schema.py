@@ -94,8 +94,7 @@ class Schema(BaseModel):
                     Given the following Input schema: {schema}, then update the metadata in the Input schema with the information from the readme.
                     """
         else:  
-            prompt = f"""Schema Name: {cls.get_schema_name()}
-                        Input Schema: {schema}
+            prompt = f"""Input Schema: {schema}
                         Paper Text: {paper_text}
                     """
         return prompt
@@ -171,6 +170,7 @@ class Schema(BaseModel):
     
     @classmethod
     def schema_to_slot(cls, guidelines = ""):
+        #TODO descriptions need some fixing ... venue title and veneue names are mixed ups 
         schema_json = json.loads(cls.schema())
         type_mapper = {
             "str": "string",
@@ -235,7 +235,7 @@ class Schema(BaseModel):
             "type": "object",
             "properties": properties
         }            
-        return json.dumps(output_json, indent=4)
+        return json.dumps(properties, indent=4)
     
     
     @classmethod
@@ -272,7 +272,7 @@ class Schema(BaseModel):
     def get_system_prompt(cls):
         return f"""
             You are a professional metadata extractor of datasets from research papers. 
-            You will be provided 'Paper Text', 'Schema Name', 'Input Schema' and you must respond with an 'Output JSON'.
+            You will be provided 'Paper Text', 'Input Schema' and you must respond with an 'Output JSON'.
             The 'Output JSON' is a JSON with key:answer where the answer retrieves an attribute of the 'Input Schema' from the 'Paper Text'. 
             Each attribute in the 'Input Schema' has the following fields:
             'options' : If the attribute has 'options' then the answer must be at least one of the options.
@@ -309,7 +309,7 @@ class Schema(BaseModel):
         if version == "3.0":
             system_prompt = f"""
                 You are a professional metadata extractor of datasets from research papers. 
-                You will be provided 'Paper Text', 'Schema Name', 'Input Schema' and you must respond with an 'Output JSON'.
+                You will be provided 'Paper Text', 'Input Schema' and you must respond with an 'Output JSON'.
                 The 'Output JSON' is a JSON with key:answer where the answer retrieves an attribute of the 'Input Schema' from the 'Paper Text'. 
                 Each attribute in the 'Input Schema' has the following fields:
                 - "type": The return type of the attribute, which is a value from [string, number, integer, list, boolean, object, array, null]
@@ -321,7 +321,7 @@ class Schema(BaseModel):
         else:
             system_prompt = f"""
                 You are a professional metadata extractor of datasets from research papers. 
-                You will be provided 'Paper Text', 'Schema Name', 'Input Schema' and you must respond with an 'Output JSON'.
+                You will be provided 'Paper Text', 'Input Schema' and you must respond with an 'Output JSON'.
                 The 'Output JSON' is a JSON with key:answer where the answer retrieves an attribute of the 'Input Schema' from the 'Paper Text'. 
                 Each attribute in the 'Input Schema' has the following fields:
                 'options' : If the attribute has 'options' then the answer must be at least one of the options.
@@ -368,9 +368,7 @@ class Schema(BaseModel):
     
     def compare_with(self, gold_metadata, return_metrics_only = False, return_precision_only = False, exact_match = False):
         results = {}
-        for key in gold_metadata.keys():
-            if key in ['annotations_from_paper']:
-                continue
+        for key in self.get_attributes():
             try:
                 results[key] = self.match_attributes(key, gold_metadata[key], self.model_dump()[key], exact_match = exact_match)
             except:
@@ -380,7 +378,7 @@ class Schema(BaseModel):
         if return_precision_only:
             return {'precision': precision}
         annotations_from_paper = gold_metadata['annotations_from_paper']
-        annotated_attributes = [key for key in gold_metadata.keys() if key in annotations_from_paper and annotations_from_paper[key]]
+        annotated_attributes = [key for key in self.get_attributes() if key in annotations_from_paper and annotations_from_paper[key]]
         recall = sum([value for key, value in results.items() if key in annotated_attributes]) / len(annotated_attributes)
         if precision + recall == 0:
             f1 = 0
@@ -581,7 +579,7 @@ class TestSchema(Schema):
         schema = cls.get_schema_from_version(version, length_constrain)
         prompt = cls.get_prompt(paper_text = paper_text, readme = readme, schema = schema)
         system_prompt = """You are a professional metadata extractor from a given Text. 
-            You will be provided 'Text', 'Schema Name', 'Input Schema' and you must respond with an 'Output JSON'.
+            You will be provided 'Text', 'Input Schema' and you must respond with an 'Output JSON'.
             The 'Output JSON' is a JSON with key:answer where the answer retrieves an attribute of the 'Input Schema' from the 'Paper Text'. 
             Each attribute in the 'Input Schema' has the following fields:
             'options' : If the attribute has 'options' then the answer must be at least one of the options.
@@ -608,7 +606,7 @@ class ResourceSchema(Schema):
         prompt = cls.get_prompt(paper_text = paper_text, readme = readme, schema = schema)
         system_prompt = f"""
         You are a professional metadata extractor of resources from research papers. 
-        You will be provided 'Paper Text', 'Schema Name', 'Input Schema' and you must respond with an 'Output JSON'.
+        You will be provided 'Paper Text', 'Input Schema' and you must respond with an 'Output JSON'.
         The 'Output JSON' is a JSON with key:answer where the answer retrieves an attribute of the 'Input Schema' from the 'Paper Text'. 
         Each attribute in the 'Input Schema' has the following fields:
         'options' : If the attribute has 'options' then the answer must be at least one of the options.
@@ -807,40 +805,41 @@ class {class_name}(Schema):
 
 def get_schema(schema_name = "", schema = None):
     if schema_name == 'ar':
-        return ArSchema
+        schema_cls = ArSchema
     elif schema_name == 'en':
-        return EnSchema
+        schema_cls = EnSchema
     elif schema_name == 'jp':
-        return JpSchema
+        schema_cls = JpSchema
     elif schema_name == 'ru':
-        return RuSchema
+        schema_cls = RuSchema
     elif schema_name == 'fr':
-        return FrSchema
+        schema_cls = FrSchema
     elif schema_name == 'multi':
-        return MultiSchema
-    elif schema_name == 'test':
-        return TestSchema
+        schema_cls = MultiSchema
+    elif schema_name == 'test':     
+        schema_cls = TestSchema
     elif schema_name == 'resource':
-        return ResourceSchema
+        schema_cls = ResourceSchema
     elif schema_name == 'model':
-        return ModelSchema
+        schema_cls = ModelSchema
     elif schema_name == 'tool':
-        return ToolSchema
+        schema_cls = ToolSchema
     elif schema_name == 'msed':
-        return MsedSchema
+        schema_cls = MsedSchema
     elif schema_name == 's2orc':
-        return S2ORCSchema
+        schema_cls = S2ORCSchema
     elif schema_name == 'bib':
-        return BIBSchema
+        schema_cls = BIBSchema
     elif schema_name == 'parent':
-        return Parent
+        schema_cls = Parent
     elif schema_name == 'nadl':
-        return NADLSchema
+        schema_cls = NADLSchema
     elif schema is not None:
         schema_code = generate_schema_from_json(schema, 'CustomSchema')
         namespace = {}
         exec(schema_code, namespace)
-        return namespace['CustomSchema']
+        schema_cls = namespace['CustomSchema']
 
     else:
         raise ValueError(f"Invalid schema name: {schema_name}")
+    return schema_cls
