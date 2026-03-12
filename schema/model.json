@@ -7,7 +7,7 @@
     },
     "Num_Parameters": {
         "question": "What is the number of parameters of the model?",
-        "answer_type": "Float",
+        "answer_type": "float",
         "answer_min": 1,
         "answer_max": 1000
     },

@@ -84,8 +84,8 @@
     "Year": {
         "question": "What year was the dataset published?",
         "answer_type": "date[year]",
-        "answer_min": 1,
-        "answer_max": 1
+        "answer_min": 1000,
+        "answer_max": 2026
     },
     "Language": {
         "question": "What languages are in the dataset?",

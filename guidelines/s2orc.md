@@ -1,5 +1,4 @@
 # Guidelines for Papers Schema
-In this task we want to extract metadata from papers. Here is a discribtion of the mdatadata:
 
 1. **Paper_Link**: the direct link to access the paper
 2. **Title**: the title of the paper

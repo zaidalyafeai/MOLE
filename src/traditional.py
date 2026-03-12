@@ -1,4 +1,4 @@
-from schema import get_schema
+from schema import Schema
 import re
 import json
 from dotenv import load_dotenv
@@ -46,7 +46,7 @@ def get_metadata_keyword(
     schema_name = "ar",
 ):
     predictions = {}
-    schema = get_schema(schema_name)
+    schema = Schema(schema_name = schema_name)
     attributes = schema.get_attributes()
     url_pattern = r'(https?://[^\s]+|www\.[^\s]+)'
     all_urls = re.findall(url_pattern, paper_text)

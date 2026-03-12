@@ -4,13 +4,15 @@ import json
 import argparse
 import numpy as np
 from plot_utils import print_table
-from utils import get_metadata_from_path, get_id_from_path, get_schema_from_path, get_schema, create_hash
+from utils import get_metadata_from_path, get_id_from_path, get_schema_from_path, create_hash
 import os
 from constants import *
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import random
 from plot_utils import get_max_per_row
+from schema import Schema
+
 args = argparse.ArgumentParser()
 args.add_argument("--split", type=str, default="test")
 args.add_argument("--year", action="store_true")
@@ -41,21 +43,21 @@ def get_all_ids():
     ids = []
     if args.schema_name == 'all':
         for cat in categories:
-            schema = get_schema(cat)
+            schema = Schema(schema_name=cat)
             data = schema.get_eval_datasets(args.split, args.eval_path)
             ids += [create_hash(paper['Paper_Link']) for paper in data]
     elif args.schema_name == 'all-model':
         for cat in categories_no_model:
-            schema = get_schema(cat)
+            schema = Schema(schema_name=cat)
             data = schema.get_eval_datasets(args.split, args.eval_path)
             ids += [create_hash(paper['Paper_Link']) for paper in data]
     elif "," in args.schema_name:
         for schema_name in args.schema_name.split(","):
-            schema = get_schema(schema_name)
+            schema = Schema(schema_name=schema_name)
             data = schema.get_eval_datasets(args.split, args.eval_path)
             ids += [create_hash(paper['Paper_Link']) for paper in data]
     else:
-        schema = get_schema(args.schema_name)
+        schema = Schema(schema_name=args.schema_name)
         data = schema.get_eval_datasets(args.split, args.eval_path)
         ids = [create_hash(paper['Paper_Link']) for paper in data]
     return ids
@@ -230,11 +232,11 @@ def show_examples():
             if results["config"]["browse_web"]:
                 model_name += " (Browsing)"
             schema_name = results["config"]["schema_name"]
-            schema = get_schema(schema_name)
-            pred_metadata = schema(metadata = results["metadata"])
+            schema = Schema(schema_name = schema_name)
+            metadata = results["metadata"]
 
             gold_metadata = get_metadata_from_path(json_file, eval_path = args.eval_path)
-            scores = pred_metadata.compare_with(gold_metadata, exact_match = args.use_exact_match)
+            scores = schema.evaluate(metadata, gold_metadata, exact_match = args.use_exact_match)
             if model_name not in metric_results:
                 metric_results[model_name] = {column: [] for column in attributes}
             if 'Gold' not in metric_results:
@@ -290,13 +292,10 @@ def extract_results(json_file, headers):
     schema_name = results["config"]["schema_name"]
     if results["config"]["browse_web"]:
         model_name += " (Browsing)"
-    schema = get_schema(schema_name)
-    pred_metadata = schema(metadata = results["metadata"])
-
-    # human_json_path = human_json_path.replace(f"/{args.type}", "")
+    schema = Schema(schema_name = schema_name)
+    pred_metadata = results["metadata"]
     gold_metadata = get_metadata_from_path(json_file, eval_path = args.eval_path)
-    scores = pred_metadata.compare_with(gold_metadata, exact_match = args.use_exact_match)
-    
+    scores = schema.evaluate(pred_metadata, gold_metadata, exact_match = args.use_exact_match)
     if args.group_by_x == "category":
         if args.penalize_errors and results["error"] is not None:
             output[schema_name].append(0)
@@ -439,14 +438,15 @@ if __name__ == "__main__":
     for file in all_files:
         json_data = json.load(open(file))
         model_name = json_data['config']['model_name']
-        # if any([model in model_name.lower() for model in ['gemini', 'moonshotai', 'x-ai']]):
-        #     json_files.append(file)
+        if any([model in model_name.lower() for model in ['gemini', 'moonshotai', 'x-ai']]):
+            json_files.append(file)
         if 'kimi-k2' in model_name.lower():
             if 'r_8_alpha_16' in model_name.lower():
                 if skip_mextract_variants(model_name):
                     continue
                 json_files.append(file)
         else:
+        # if 'without-object-wrapper' in model_name.lower():
             json_files.append(file)
 
     if args.model is not None:

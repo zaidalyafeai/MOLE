@@ -1,9 +1,7 @@
 # type: ignore
 
-from schema import Schema, Parent, ArSchema, MultiSchema, get_schema
-from pydantic import Field
+from schema import Schema
 from type_classes import *
-from search import run
 from rich import print
 import json
 
@@ -25,12 +23,19 @@ gold_metadata1  = {
     }
 }
 
-predicted_metadata = Parent(
-    path = 'testfiles/test1.json'
+parent_schema = {
+        "Name": {"type": "string", "description": "Name of the person", "minLength": 1, "maxLength": 1},
+        "Age": {"type": "integer", "description": "Age of the person", "minimum": 0, "maximum": 100},
+        "Website": {"type": "string", "description": "Website of the person", "minLength": 1, "maxLength": 1},
+        "Hobbies": {"type": "array", "description": "Hobbies of the person", "items": {"type": "string", "enum": ["reading", "swimming", "coding"]}, "minItems": 1, "maxItems": 3},
+        "Married": {"type": "boolean", "description": "Married status of the person"},
+        "Sons": {"type": "array", "description": "Sons of the person", "items": {"type": "object"}, "minItems": 0, "maxItems": 3},
+}
+sc = Schema(
+    schema = parent_schema
 )
-print(predicted_metadata.schema())
-
-evaluation_results = predicted_metadata.compare_with(gold_metadata1)
+metadata = json.load(open('testfiles/test1.json'))
+evaluation_results = sc.evaluate(metadata, gold_metadata1)
 
 for m in evaluation_results:
     assert evaluation_results[m] == 1, f'❌ {m} value should be 1 but got {evaluation_results[m]}'
@@ -38,31 +43,25 @@ print('✅ passed test1')
 
 
 # [reading] - > [reading, swimming]
-validated_metadata = Parent(
-    path = 'testfiles/test2.json'
-)
-evaluation_results = validated_metadata.compare_with(gold_metadata1)
+metadata = json.load(open('testfiles/test2.json'))
+evaluation_results = sc.evaluate(metadata, gold_metadata1)
 assert evaluation_results['Hobbies'] == 0.5, f'❌ Hobbies value should be 0.5 but got {evaluation_results["Hobbies"]}'
 
 print('✅ passed test2')
 
-validated_metadata = Parent(
-    path = 'testfiles/test3.json'
-)
-assert validated_metadata.json()['Age'] == 0, '❌ Age should be 0 but got {validated_metadata["Age"]}'
+metadata = json.load(open('testfiles/test3.json'))
+evaluation_results = sc.evaluate(metadata, gold_metadata1)
+assert evaluation_results['Age'] == 0, f'❌ Age should be 0 but got {evaluation_results["Age"]}'
 print('✅ passed test3')
 
-validated_metadata = Parent(
-    path = 'testfiles/test4.json'
-)
-evaluation_results = validated_metadata.compare_with(gold_metadata1, return_metrics_only=True)
+metadata = json.load(open('testfiles/test4.json'))
+evaluation_results = sc.evaluate(metadata, gold_metadata1)
 assert abs(evaluation_results['length'] - 0.83) < 0.01, f'❌ length should be 0.83 but got {evaluation_results["length"]}'
 print('✅ passed test4')
 
-validated_metadata = Parent(
-    path = 'testfiles/test5.json'
-)
-evaluation_results = validated_metadata.compare_with(gold_metadata1)
+
+metadata = json.load(open('testfiles/test5.json'))
+evaluation_results = sc.evaluate(metadata, gold_metadata1)
 
 for m in evaluation_results:
     assert evaluation_results[m] == 1, f'❌ {m} value should be 1 but got {evaluation_results[m]}'
@@ -90,47 +89,38 @@ gold_metadata2 = {
 }
 
 
-validated_metadata = Parent(
-    path = 'testfiles/test6.json'
-)
-evaluation_results = validated_metadata.compare_with(gold_metadata2)
+metadata = json.load(open('testfiles/test6.json'))
+evaluation_results = sc.evaluate(metadata, gold_metadata2)
 
 for m in evaluation_results:
     assert evaluation_results[m] == 1, f'❌ {m} value should be 1 but got {evaluation_results[m]}'
 print('✅ passed test6')
 
 
-validated_metadata = Parent(
-    path = 'testfiles/test7.json'
-)
-evaluation_results = validated_metadata.compare_with(gold_metadata1)
+metadata = json.load(open('testfiles/test7.json'))
+evaluation_results = sc.evaluate(metadata, gold_metadata1)
 
 for m in evaluation_results:
     assert evaluation_results[m] == 1, f'❌ {m} value should be 1 but got {evaluation_results[m]}'
 print('✅ passed test7')
 
-validated_metadata = Parent(
-    path = 'testfiles/test8.json'
-)
-evaluation_results = validated_metadata.compare_with(gold_metadata1)
+metadata = json.load(open('testfiles/test8.json'))
+evaluation_results = sc.evaluate(metadata, gold_metadata1)
 
 for m in evaluation_results:
     assert evaluation_results[m] == 1, f'❌ {m} value should be 1 but got {evaluation_results[m]}'
 print('✅ passed test8')
 
-validated_metadata = Parent(
-    path = 'testfiles/test9.json'
-)
-evaluation_results = validated_metadata.compare_with(gold_metadata1)
+
+metadata = json.load(open('testfiles/test9.json'))
+evaluation_results = sc.evaluate(metadata, gold_metadata1)
 
 for m in evaluation_results:
     assert evaluation_results[m] == 1, f'❌ {m} value should be 1 but got {evaluation_results[m]}'
 print('✅ passed test9')
 
-validated_metadata = Parent(
-    path = 'testfiles/test10.json'
-)
-evaluation_results = validated_metadata.compare_with(gold_metadata1)
+metadata = json.load(open('testfiles/test10.json'))
+evaluation_results = sc.evaluate(metadata, gold_metadata1)
 
 for m in evaluation_results:
     assert evaluation_results[m] == 1, f'❌ {m} value should be 1 but got {evaluation_results[m]}'
@@ -152,80 +142,55 @@ default_metadata = {
         "Married": 1
     }
 }
-
-predicted_metadata = Parent.generate_metadata(method = 'default')
-evaluation_results = predicted_metadata.compare_with(default_metadata, return_metrics_only=True)
+metadata = sc.generate_metadata(method = 'default')
+evaluation_results = sc.evaluate(metadata, default_metadata, return_metrics_only=True)
 for m in evaluation_results:
     if m == 'length':
-        assert abs(evaluation_results[m] - 0.33) < 0.01, f'❌ {m} value should be 0.66 but got {evaluation_results[m]}'
+        assert abs(evaluation_results[m] - 0.5) < 0.01, f'❌ {m} value should be 0.5 but got {evaluation_results[m]}'
     else:
         assert evaluation_results[m] == 1, f'❌ {m} value should be 1 but got {evaluation_results[m]}'
 print('✅ passed test11')
 
 # validate metadata
 from jsonschema import validate
-schema = Parent(
-    path = 'testfiles/test12.json'
-)
-schema_to_slot = json.loads(schema.schema_to_slot(""))
-print(schema_to_slot)
-validate(instance=schema.json(), schema=schema_to_slot)
+metadata = json.load(open('testfiles/test12.json'))
+validate(instance=metadata, schema=sc.schema)
 print('✅ passed test12')
 
 # validate metadata
 from jsonschema import validate
-schema = ArSchema(
-    path = 'testfiles/test11.json'
-)
-print(schema.get_prompts("", "", version="3.0"))
-schema_to_slot = json.loads(schema.schema_to_slot(""))
-validate(instance=schema.json(), schema=schema_to_slot)
+sc = Schema(schema_name="ar")
+metadata = json.load(open('testfiles/test11.json'))
+
+validate(instance=metadata, schema=sc.schema)
 print('✅ passed test13')
 
 # validate metadata
 from jsonschema import validate
-schema = MultiSchema(
-    path = 'testfiles/test13.json'
-)
-print(schema.get_prompts("", "", version="3.0"))
-schema_to_slot = json.loads(schema.schema_to_slot(""))
-validate(instance=schema.json(), schema=schema_to_slot)
+schema = Schema(schema_name = 'ar', version = "3.0")
+metadata = json.load(open('testfiles/test13.json'))
+validate(instance=metadata, schema=schema.schema)
 print('✅ passed test14')
 
-import json
-with open("testfiles/test14.json", "r") as f:
-    schema = json.load(f)  # Execute to create the class
+sc = Schema(schema_name = 'ar', version = "2.0")
+gold_metadata = json.load(open('testfiles/test11.json'))
+metadata = json.load(open('testfiles/test11.json'))
+del metadata["annotations_from_paper"]
+results = sc.evaluate(metadata, gold_metadata)
+print('✅ passed test15')
 
-CustomSchema = get_schema(schema = schema)
-print(CustomSchema.get_schema_from_version(version = "2.0"))
-print(CustomSchema.generate_metadata(method = 'default').json())
-
-gold_metadata  = {
-    "Name": "ahmad",
-    "Age": 20,
-    "Hobbies": ["reading"],
-    'Married': True,
-    "Sons":[],
-    "annotations_from_paper": {
-        "Name": 1,
-        "Age": 1,
-        "Website": 1,
-        "Hobbies": 1,
-        "Sons": 1,
-        "Married": 1
+parent_schema["Car"] = {
+    "type": "object",
+    "description": "Car of the person",
+    "properties": {
+        "Brand": {"type": "string"},
+        "Model": {"type": "string"},
+        "Year": {"type": "integer"}
     }
 }
-
-predicted_metadata = CustomSchema(
-    metadata = {
-        "Name": "ahmad",
-        "Age": 20,
-        "Hobbies": ["reading"],
-        'Married': True,
-        "Sons":[],
-    }
-)
-print(predicted_metadata.schema())
-
-evaluation_results = predicted_metadata.compare_with(gold_metadata)
-print(evaluation_results)
+sc = Schema(schema = parent_schema)
+gold_metadata = json.load(open('testfiles/test16.json'))
+metadata = json.load(open('testfiles/test16.json'))
+del metadata["annotations_from_paper"]
+results = sc.evaluate(metadata, gold_metadata)
+print('✅ passed test16')

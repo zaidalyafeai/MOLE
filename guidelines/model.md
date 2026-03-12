@@ -1,5 +1,4 @@
 # Guidelines for Model Schema
-In this task we want to extract models' metadata from papers. Here is a discribtion of the mdatadata:
 
 1. **Name**: Name of the model family
 2. **Num_Parameters**: the number of parameters of the largest model, if there are multiple models in the paper, choose the biggest one, mostly chat version

@@ -1,46 +1,25 @@
 # type: ignore
-
-from pydantic import BaseModel, GetCoreSchemaHandler, model_validator
-from pydantic_core import CoreSchema
-from typing import Any, Annotated
-from dataclasses import dataclass
 import random
 import string
 from Levenshtein import distance as levenshtein_distance
 from rouge_score import rouge_scorer
 
+ANSWER_MAX = 1e6
 scorer = rouge_scorer.RougeScorer(['rouge1'], use_stemmer=True)
-
-@dataclass(frozen=True)
-class Constraints:
-    answer_min: int
-    answer_max: int = -1
-    pattern: str = None
-    options: list[str] = None
-
-def Field(field_type, answer_min=0, answer_max=-1, options=None):
-    return Annotated[field_type, field_type(answer_min=answer_min, answer_max=answer_max, options=options)]
 
 class BaseType:
     base_type = None
-    def __init__(self, answer_min=0, answer_max=-1, options=None, field_names=None):
+    def __init__(self, answer_min=0, answer_max=ANSWER_MAX, options=None, field_names=None):
         self.answer_min = answer_min
         self.answer_max = answer_max
         self.options = options
         self.field_names = field_names
     
     @classmethod
-    def __get_pydantic_core_schema__(
-        cls, source_type: Any, handler: GetCoreSchemaHandler
-    ) -> CoreSchema:
-        # Return the handler for int directly, don't wrap in cls
-        return handler(cls.base_type)
-    
-    @classmethod
     def compare(cls, attr1, attr2, exact_match = False):
         return int(attr1 == attr2)
     
-    def modify_length(self, value, answer_min, answer_max, accepted = True):
+    def modify_length(self, value, accepted = True):
         return value
 
 class Float(BaseType):
@@ -62,11 +41,9 @@ class Float(BaseType):
     def cast(self, value):
         return float(value)
     
-    def validate_length(self, value, answer_min, answer_max):
-        if value >= answer_min:
-            if answer_max < 0:
-                return 1
-            elif value <=answer_max:
+    def validate_length(self, value):
+        if value >= self.answer_min:
+            if value <=self.answer_max:
                 return 1
             else:
                 return 0
@@ -94,11 +71,9 @@ class Int(BaseType):
     def cast(self, value):
         return int(value)
     
-    def validate_length(self, value, answer_min, answer_max):
-        if value >= answer_min:
-            if answer_max < 0:
-                return 1
-            elif value <=answer_max:
+    def validate_length(self, value):
+        if value >= self.answer_min:
+            if value <=self.answer_max:
                 return 1
             else:
                 return 0
@@ -111,7 +86,7 @@ class Int(BaseType):
             return 1
         return 1 - abs(float(attr1) - float(attr2))/ max(float(attr1), float(attr2)) # TODO: revise
     
-    def modify_length(self, value, answer_min, answer_max, accepted = True):
+    def modify_length(self, value, accepted = True):
         return value
 
 class Bool(BaseType):
@@ -126,7 +101,7 @@ class Bool(BaseType):
     def get_type(self):
         return 'bool'
 
-    def validate_length(self, value, answer_min, answer_max):
+    def validate_length(self, value):
         return 1
     
     def cast(self, value):
@@ -161,7 +136,7 @@ class Year(Int):
         attr2 = abs(attr2 - 2010)
         return super().compare(attr1, attr2)
     
-    def modify_length(self, value, answer_min, answer_max, accepted = True):
+    def modify_length(self, value, accepted = True):
         return value
          
     
@@ -184,12 +159,12 @@ class Str(BaseType):
     def cast(self, value):
         return str(value)
     
-    def validate_length(self, value, answer_min, answer_max):
+    def validate_length(self, value):
         if value == '':
             metric = []
         else:
             metric = value.split(' ')
-        return int(len(metric) >= answer_min and len(metric) <= answer_max or self.options is not None)
+        return int(len(metric) >= self.answer_min and len(metric) <= self.answer_max or self.options is not None)
     
     def compare(self, attr1, attr2, exact_match = False):
         if exact_match:
@@ -199,11 +174,11 @@ class Str(BaseType):
         else:
             return 1 - levenshtein_distance(attr1, attr2) / max(len(attr1), len(attr2)) # TODO: revise
     
-    def modify_length(self, value, answer_min, answer_max, accepted = True):
+    def modify_length(self, value, accepted = True):
         modified_value = value
         if self.options is None:
             if accepted:
-                if answer_max == 0:
+                if self.answer_max == 0:
                     return ''
                 return value.replace(' ' ,'_')
             else:
@@ -287,46 +262,78 @@ class List(BaseType):
                 len_match += 1
         return len_match / max(len(attr1), len(attr2)) # TODO: revise
     
-    def validate_length(self, value, answer_min, answer_max):
-        return int(len(value) >= answer_min and len(value) <= answer_max)
+    def validate_length(self, value):
+        return int(len(value) >= self.answer_min and len(value) <= self.answer_max)
     
-    def modify_length(self, value, answer_min, answer_max, accepted = True):
+    def modify_length(self, value, accepted = True):
         modified_value = value.copy()
         if self.options is not None:
             if not accepted:
-                remaining = answer_max - len(modified_value)
+                remaining = self.answer_max - len(modified_value)
                 modified_value = modified_value + random.choices(self.options, k=random.randint(remaining + 1, remaining +5))
         if accepted:
-            if answer_max == 0:
+            if self.answer_max == 0:
                 modified_value = []
             else:
-                modified_value = modified_value[:answer_max]
+                modified_value = modified_value[:self.answer_max]
         return modified_value
+
+class Dict(BaseType):
+    def __init__(self, answer_min = 0, answer_max = 1, options = None):
+        self.answer_min = answer_min
+        self.answer_max = answer_max
+        self.options = options
     
-class Cars(BaseModel):
-    Model: Field(Str)
-    Color: Field(Str, options=['Red', 'Blue', 'Green'])
-
-class Person(BaseModel):
-    Age: Field(Int)
-    Name: Field(Str, 1, 5)
-    Hobbies: Field(List[Str], 1, 2, options=['reading', 'swimming', 'coding', 'other'])
-    Cars: Field(List[Cars])
-    Married: Field(Bool)
-    Website: Field(URL)
-    Salary: Field(Float, 1000, 100000)
+    def get_type(self):
+        return "dict"
     
-    @model_validator(mode='before') # validate based on the type of the field
-    def validate_a(cls, data):
-        for key, value in cls.model_fields.items():
-            metadata = value.metadata[0]      
-            data[key] = metadata.get_random() if data[key] is None else data[key]
-            # data[key] = metadata.default if data[key] is None else data[key]
-        
-        return data
-
-PRIMITIVE_TYPES = [Int, Float, Bool, Year, URL, Str]
-
+    def validate(self, value):
+        if not isinstance(value, dict):
+            return False
+        return True
+    
+    def cast(self, value):
+        if not isinstance(value, dict):
+            return {}
+        return value
+    
+    def get_default(self):
+        return {}
+    
+    def validate_length(self, value):
+        return int(len(value) >= self.answer_min and len(value) <= self.answer_max)
+    
+    def compare(self, attr1, attr2, exact_match = False):
+        if exact_match:
+            return int(attr1 == attr2)
+        len_match = 0
+        all_keys = set(attr1.keys()) | set(attr2.keys())
+        for key in all_keys:
+            if key in attr1 and key in attr2:
+                if attr1[key] == attr2[key]:
+                    len_match += 1
+        return len_match / len(all_keys)
+    
+def get_type(t):
+    if t == "int":
+        return Int
+    elif t == "float":
+        return Float
+    elif t == "bool":
+        return Bool
+    elif t == "year":
+        return Year
+    elif t == "url":
+        return URL
+    elif t == "string":
+        return Str
+    elif t == "list":
+        return List
+    elif t == "dict":
+        return Dict
+    else:
+        return None
+    
 if __name__ == '__main__':
     test = {
         'Age': None,

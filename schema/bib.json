@@ -15,7 +15,7 @@
         "question": "What is the year of birth?",
         "answer_type": "date[year]",
         "answer_min": 1000,
-        "answer_max": 2025
+        "answer_max": 2026
     },
     "YearOfDeath": {
         "question": "What is the year of death?",

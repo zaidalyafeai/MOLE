@@ -1,5 +1,4 @@
 # Guidelines for Bib Schema
-In this task we want to extract metadata from wiki pages. Here is a discribtion of the mdatadata:
 
 1. **Name**: the name of the person
 2. **YearOfBirth**: the year of birth of the person

@@ -13,7 +13,8 @@
         "answer_max": 1
     },
     "License": {
-        "question": "",
+        "question": "What is the license of the tool?",
+        "answer_type": "str",
         "options": [
             "Apache-1.0",
             "Apache-2.0",
@@ -68,8 +69,8 @@
     "Year": {
         "question": "What year was the tool published?",
         "answer_type": "date[year]",
-        "answer_min": 1,
-        "answer_max": 1
+        "answer_min": 1000,
+        "answer_max": 2026
     },
     "Access": {
         "question": "How to access the tool?",

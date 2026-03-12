@@ -1,5 +1,4 @@
 # Guidelines for Tool Schema
-In this task we want to extract tools' metadata from papers. Here is a discribtion of the mdatadata:
 
 1. **Name**: Name of the tool
 2. **Link**: the direct link to access the tool

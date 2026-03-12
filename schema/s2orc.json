@@ -26,8 +26,8 @@
     "Year": {
         "question": "What year was the paper published?",
         "answer_type": "date[year]",
-        "answer_min": 1900,
-        "answer_max": 2025
+        "answer_min": 1000,
+        "answer_max": 2026
     },
     "Field": {
         "question": "What is the field of the paper?",

@@ -10,7 +10,7 @@ import time
 from openai import OpenAI
 from utils import read_json, get_metadata_human, create_hash, get_metadata_judge, get_repo_link, fetch_repository_metadata, TextLogger, get_paper_content_from_docling
 from traditional import get_metadata_keyword, get_metadata_qa, get_metadata_langextract
-from schema import get_schema
+from schema import Schema
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from search_acl import ACLDownloader, Downloader
 
@@ -101,15 +101,12 @@ def get_metadata(
         "cost": 0,
     }
     logger = TextLogger(log = log)
-    schema = get_schema(schema_name, schema = schema_json)
+    schema = Schema(schema = schema_json, schema_name = schema_name, version = version)
 
     for i in range(max_retries):
         predictions = {}
         error = None
-        if schema_name is None:
-            prompt, sys_prompt = schema.get_prompts_from_schema(paper_text, readme,  schema_json, version = version)
-        else:
-            prompt, sys_prompt = schema.get_prompts(paper_text, readme, metadata, version = version, length_constrain = length_constrain)
+        prompt, sys_prompt = schema.get_prompts(paper_text, readme, metadata)
         messages = [{"role": "system", "content": sys_prompt}, {"role": "user", "content": prompt}]
 
         
@@ -148,6 +145,7 @@ def get_metadata(
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": prompt}
             ]
+            # print(messages)
             text = tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
@@ -157,7 +155,7 @@ def get_metadata(
 
             generated_ids = model.generate(
                 **model_inputs,
-                max_new_tokens=512
+                max_new_tokens=2084
             )
             generated_ids = [
                 output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
@@ -190,10 +188,12 @@ def get_metadata(
                 # Do nothing, already handled above
                 pass
             else:
+                print(messages)
                 message = client.chat.completions.create(
                         model=model_name,
                         messages=messages,
                     )
+                # print(message)
         try:
             if backend == "openrouter":
                 cost = get_cost(message)
@@ -211,7 +211,7 @@ def get_metadata(
             predictions = read_json(response)
         except json.JSONDecodeError as e:
             error = str(e)
-            logger.show_warning(message.choices[0].message.content)  
+            logger.show_warning(response)  
         except Exception as e:
             if message is None:
                 error = "Timeout"
@@ -227,7 +227,7 @@ def get_metadata(
             # time.sleep(3)
     time.sleep(timeout)
     if predictions == {}:
-        predictions = schema.generate_metadata(method = 'default').json()
+        predictions = schema.generate_metadata(method = 'default')
     return message, predictions, cost, error
 
 def clean_latex(path):
@@ -372,7 +372,7 @@ def run(
     }
     logger.show_info(f"🔍 Running on {paper_link}")
     model_results = {}
-    schema = get_schema(args.schema_name)
+    schema = Schema(schema_name = args.schema_name, version = args.version)
     
     success, paper_path = download_paper(paper_link, log = args.log)
     if not success:
@@ -496,19 +496,19 @@ def run(
             else:
                 message = None
     logger.show_info("🔍 Validating Metadata ...")
-    try:
-        metadata = schema(metadata = metadata)
-    except Exception as e:
-        logger.show_error("Failed to validate metadata:")
-        logger.show_warning(metadata)
-        logger.show_error(f"{e}")
-        metadata = schema.generate_metadata(method = 'default')
+    # try:
+    schema = Schema(schema_name = args.schema_name, version = args.version)
+    # except Exception as e:
+    #     logger.show_error("Failed to validate metadata:")
+    #     logger.show_warning(metadata)
+    #     logger.show_error(f"{e}")
+    #     metadata = schema.generate_metadata(method = 'default')
         
     results = {}
-    results["metadata"] = metadata.json()
+    results["metadata"] = metadata
     gold_metadata = get_metadata_human(paper_link=paper_link, schema_name=args.schema_name)
     if gold_metadata is not None:
-        evaluation_results = metadata.compare_with(gold_metadata, return_metrics_only=True)
+        evaluation_results = schema.evaluate(metadata, gold_metadata, return_metrics_only=True)
         results["validation"] = evaluation_results
         logger.show_info(
             f"📊 precision: {evaluation_results['precision']*100:.2f} %, recall: {evaluation_results['recall']*100:.2f} %, f1: {evaluation_results['f1']*100:.2f} %, length: {evaluation_results['length']*100:.2f} %"
