@@ -64,7 +64,7 @@ def calculate_max_output_tokens(tokenizer):
 
 def truncate_prompt(prompt, sys_prompt, tokenizer, max_model_len, max_output_len = 1024, log = True):
     logger = TextLogger(log = log)
-    end_of_prompt = "\nOutput JSON: "
+    end_of_prompt = "\nOutput JSON:"
     num_prompt_tokens = len(tokenizer.encode(prompt))
     num_system_tokens = get_text_tokens(sys_prompt, tokenizer)
     end_of_prompt_tokens = get_text_tokens(end_of_prompt, tokenizer)
@@ -85,7 +85,7 @@ def get_metadata(
     schema_name=None,
     use_cot=True,
     few_shot = 0,
-    max_retries = 3,
+    max_retries = 1,
     backend = "openrouter",
     max_model_len = 32768,
     max_output_len = 1024,
@@ -138,14 +138,13 @@ def get_metadata(
                 torch_dtype="auto",
                 device_map="auto"
             )
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            tokenizer = AutoTokenizer.from_pretrained(model_name, fix_mistral_regex=True)
 
             prompt = truncate_prompt(prompt, sys_prompt, tokenizer, max_model_len, max_output_len = max_output_len, log = log)
             messages = [
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": prompt}
             ]
-            # print(messages)
             text = tokenizer.apply_chat_template(
                 messages,
                 tokenize=False,
@@ -153,9 +152,13 @@ def get_metadata(
             )
             model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
 
+            # decode
+            logger.show_info(tokenizer.batch_decode(model_inputs.input_ids, skip_special_tokens=False))
+            
             generated_ids = model.generate(
                 **model_inputs,
-                max_new_tokens=2084
+                max_new_tokens=2048,
+                do_sample = False
             )
             generated_ids = [
                 output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
@@ -176,58 +179,47 @@ def get_metadata(
                 },
             })
         else:
-            if "qwen3" in model_name.lower():
+            # if "qwen3" in model_name.lower():
+            #     message = client.chat.completions.create(
+            #             model=model_name,
+            #             messages=messages,
+            #             extra_body={
+            #                 "chat_template_kwargs": {"enable_thinking": False},
+            #             }
+            #         )
+            # elif backend == "transformers":
+            #     # Do nothing, already handled above
+            #     pass
+            if backend == "vllm" or backend == "openrouter":
+                # print(messages)
                 message = client.chat.completions.create(
                         model=model_name,
                         messages=messages,
-                        extra_body={
-                            "chat_template_kwargs": {"enable_thinking": False},
-                        }
-                    )
-            elif backend == "transformers":
-                # Do nothing, already handled above
-                pass
-            else:
-                print(messages)
-                message = client.chat.completions.create(
-                        model=model_name,
-                        messages=messages,
+                        temperature=0,
+                        seed=42
                     )
                 # print(message)
-        try:
-            if backend == "openrouter":
-                cost = get_cost(message)
-            else:
-                cost = {
-                    "cost": 0,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                }
-            if backend == "transformers":
-                response = response
-                message = None
-            else:
-                response =  message.choices[0].message.content
-            predictions = read_json(response)
-        except json.JSONDecodeError as e:
-            error = str(e)
-            logger.show_warning(response)  
-        except Exception as e:
-            if message is None:
-                error = "Timeout"
-            elif message.choices is None:
-                error = message.error["message"]
-            else:
-                error = str(e)
-        if predictions != {}:
-            break
+        if backend == "openrouter":
+            cost = get_cost(message)
         else:
-            logger.show_warning(error)
-            logger.show_warning(f"Failed to get predictions for {model_name}, retrying ...")
-            # time.sleep(3)
+            cost = {
+                "cost": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+            }
+        if backend == "transformers":
+            predictions = response
+            message = None
+        else:
+            predictions =  message.choices[0].message.content
+        try:
+            read_json(predictions)
+        except Exception as e:
+            error = str(e)
+            print(f"Error: {error}")
+
+
     time.sleep(timeout)
-    if predictions == {}:
-        predictions = schema.generate_metadata(method = 'default')
     return message, predictions, cost, error
 
 def clean_latex(path):
@@ -268,7 +260,7 @@ def extract_paper_text(path, format = "pdf_plumber", use_cached_docling=True, lo
             elif format == "pdf_docling":
                 # If we need to extract (either no existing file or reading failed)
                 pdf_dir = os.path.dirname(source_file)
-                docling_file_path = os.path.join(pdf_dir, "paper_text_docling.txt")
+                docling_file_path = os.path.join(pdf_dir, "paper_docling.txt")
                 
                 # Check if docling extraction already exists and reuse it
                 if os.path.exists(docling_file_path) and use_cached_docling:
@@ -324,9 +316,15 @@ def download_paper(paper_link, download_path="static/papers/", log = True):
 def extract_and_save_paper_text(paper_path, context = "all", format = "pdf_plumber", save_paper_text = True, paper_extra_args = {}, log = True):
     paper_text = ""
     logger = TextLogger(log = log)
-    if os.path.exists(f"{paper_path}/paper_text.txt"):
-        logger.show_info(f"📄 Found existing paper text at {paper_path}/paper_text.txt")
-        with open(f"{paper_path}/paper_text.txt", "r") as f:
+    if format == "pdf_plumber":
+        paper_name = "paper_text.txt"
+    elif format == "pdf_docling":
+        paper_name = "paper_docling.txt"
+    else:
+        raise ('Format error')
+    if os.path.exists(f"{paper_path}/{paper_name}"):
+        logger.show_info(f"📄 Found existing paper text at {paper_path}/{paper_name}")
+        with open(f"{paper_path}/{paper_name}", "r") as f:
             paper_text = f.read()
     
     if context == "title":
@@ -507,8 +505,15 @@ def run(
     results = {}
     results["metadata"] = metadata
     gold_metadata = get_metadata_human(paper_link=paper_link, schema_name=args.schema_name)
+    
     if gold_metadata is not None:
-        evaluation_results = schema.evaluate(metadata, gold_metadata, return_metrics_only=True)
+        if error is None:
+            pred_metadata = read_json(metadata)
+        else:
+            pred_metadata = schema.generate_metadata(method = 'default')
+        
+        evaluation_results = schema.evaluate(pred_metadata, gold_metadata, return_metrics_only=True)
+            
         results["validation"] = evaluation_results
         logger.show_info(
             f"📊 precision: {evaluation_results['precision']*100:.2f} %, recall: {evaluation_results['recall']*100:.2f} %, f1: {evaluation_results['f1']*100:.2f} %, length: {evaluation_results['length']*100:.2f} %"
