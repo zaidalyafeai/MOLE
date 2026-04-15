@@ -5,7 +5,10 @@ from type_classes import *
 from rich import print
 import json
 
-
+schema = Schema(schema_name = "ar")
+print(schema.dump_schema())
+print(schema.get_formatted_guidelines())
+raise
 gold_metadata1  = {
     "Name": "ahmad",
     "Age": 20,
@@ -32,7 +35,7 @@ parent_schema = {
         "Sons": {"type": "array", "description": "Sons of the person", "items": {"type": "object"}, "minItems": 0, "maxItems": 3},
 }
 sc = Schema(
-    schema = parent_schema
+    schema = parent_schema,
 )
 metadata = json.load(open('testfiles/test1.json'))
 evaluation_results = sc.evaluate(metadata, gold_metadata1)

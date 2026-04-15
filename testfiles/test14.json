@@ -1,0 +1,41 @@
+{
+    "Name": {
+        "type": "string",
+        "description": "The name of the person."
+    },
+    "Age": {
+        "type": "integer",
+        "description": "The age of the person."
+    },
+    "Gender": {
+        "type": "string",
+        "description": "The gender of the person.",
+        "enum": ["male", "female", "other"]
+    },
+    "Hobbies": {
+        "type": "array",
+        "description": "The hobbies of the person.",
+        "items": {
+            "type": "string"
+        }
+    },
+    "Married": {
+        "type": "boolean",
+        "description": "is the person married?"
+    },
+    "Sons": {
+        "type": "array",
+        "description": "the sons of the person",
+        "items": {
+            "type": "object",
+            "properties": {
+                "Name": {
+                    "type": "string"
+                },
+                "Age": {
+                    "type": "integer"
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,25 @@
+{
+    "Name": "ahmad",
+    "Age": 20,
+    "Website": "https://www.google.com",
+    "Hobbies": ["reading", "swimming", "coding"],
+    "Sons": [{
+        "Name": "khalid",
+        "Age": 10
+    }],
+    "Married": true,
+    "Car": {
+        "Brand": "Toyota",
+        "Model": "Camry",
+        "Year": 2020
+    },
+    "annotations_from_paper": {
+        "Name": 1,
+        "Age": 1,
+        "Website": 1,
+        "Hobbies": 1,
+        "Sons": 1,
+        "Married": 1,
+        "Car": 1
+    }
+}
