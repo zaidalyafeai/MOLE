@@ -1,7 +1,7 @@
 from search import run
 from tabulate import tabulate  # type: ignore
 import numpy as np
-from schema import get_schema
+from schema import Schema
 import asyncio
 import concurrent.futures
 from arg_utils import args
@@ -9,7 +9,7 @@ from utils import TextLogger
 
 async def main(args):
     metric_results = {}
-    dataset = get_schema(args.schema_name).get_eval_datasets(split = args.split)
+    dataset = Schema(schema_name = args.schema_name).get_eval_datasets(split = args.split)
     logger = TextLogger(log = args.log)
     
     # Create a thread pool executor
