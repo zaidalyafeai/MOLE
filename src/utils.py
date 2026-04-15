@@ -13,7 +13,7 @@ from base64 import b64decode
 from datetime import date
 from functools import wraps
 from glob import glob
-from schema import get_schema
+from schema import Schema
 import hashlib
 # Third-party imports
 import pandas as pd
@@ -205,8 +205,8 @@ def get_metadata_from_path(json_path, eval_path="evals"):
 
 def get_schema_from_path(json_path):
     id = get_id_from_path(json_path)
-    for schema in ['ar', 'en', 'jp', 'fr', 'ru', 'multi']:
-        if id in get_schema(schema).get_eval_datasets():
+    for schema_name in ['ar', 'en', 'jp', 'fr', 'ru', 'multi']:
+        if id in Schema(schema_name = schema_name).get_eval_datasets():
             return schema
     raise Exception(f"Schema not found for {id}")
 
@@ -341,7 +341,7 @@ def get_dummy_results():
 
 
 def get_metadata_human(paper_link, schema_name="ar", remove_annotations_from_paper=False):
-    schema = get_schema(schema_name)
+    schema = Schema(schema_name = schema_name)
     dataset = schema.get_eval_datasets(split = 'test')+schema.get_eval_datasets(split = 'valid')
     for row in dataset:
         if paper_link == row["Paper_Link"]:
@@ -487,10 +487,41 @@ def fix_json(json_str: str) -> str:
     except json.JSONDecodeError as e:
         raise e
 
+def convert_to_structured(links):
+    from docling.document_converter import DocumentConverter
+    from docling.datamodel.settings import settings
+
+    # settings.perf.page_batch_size = 64  # default is 4
+
+    converter = DocumentConverter()
+    results = converter.convert_all(links)
+
+    return [r.document.export_to_markdown() for r in results]
+
+def truncate_by_tokens(text, tokenizer,  num_tokens = 100):
+    return tokenizer.decode(tokenizer.encode(text)[:num_tokens], skip_special_tokens=True)
+
+def get_num_tokens(text, tokenizer):
+    return len(tokenizer.encode(text))
+
+def merge_multiple_json_objects(json_str):
+    # Find all JSON objects inside the string
+    objects = re.findall(r'\{.*?\}', json_str)
+
+    merged = {}
+
+    for obj in objects:
+        parsed = json.loads(obj)
+        merged.update(parsed)
+    return merged
 
 def read_json(text_json):
-    text_json = text_json.replace("```json", "").replace("```", "")
-    fixed_json = fix_json(text_json)
+    fixed_json = text_json.replace("```json", "").replace("```", "")
+    fixed_json = fixed_json.replace('“', '"').replace('”', '"')
+    # fixed_json = fix_json(text_json)
+    # fixed_json = merge_multiple_json_objects(fixed_json)
+    if isinstance(fixed_json, str):
+        fixed_json = json.loads(fixed_json)
     if 'answer' in fixed_json:
         fixed_json = fixed_json['answer']
     return fixed_json
