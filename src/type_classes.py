@@ -172,6 +172,8 @@ class Str(BaseType):
         if len(attr1) == len(attr2) == 0:
             return 1
         else:
+            attr1 = attr1.lower()
+            attr2 = attr2.lower()
             return 1 - levenshtein_distance(attr1, attr2) / max(len(attr1), len(attr2)) # TODO: revise
     
     def modify_length(self, value, accepted = True):
@@ -191,6 +193,8 @@ class LongStr(Str):
         if exact_match:
             return int(attr1 == attr2)
         # use rouge score
+        attr1 = attr1.lower()
+        attr2 = attr2.lower()
         results = scorer.score(attr1, attr2)
         return results['rouge1'].fmeasure
     
@@ -210,6 +214,8 @@ class URL(Str):
         if len(attr1) == len(attr2) == 0:
             return 1
         else:
+            attr1 = attr1.lower()
+            attr2 = attr2.lower()
             return 1 - levenshtein_distance(attr1, attr2) / max(len(attr1), len(attr2)) # TODO: revise
     
 class List(BaseType):
@@ -306,6 +312,9 @@ class Dict(BaseType):
     def compare(self, attr1, attr2, exact_match = False):
         if exact_match:
             return int(attr1 == attr2)
+            
+        if len(attr1) == len(attr2) == 0:
+            return 1
         len_match = 0
         all_keys = set(attr1.keys()) | set(attr2.keys())
         for key in all_keys:

@@ -1,23 +1,18 @@
 # type: ignore
-from pydantic import model_validator
 import json
 from type_classes import *
 from glob import glob
 
 SCHEMA_NAMES = ["ar", "en", "jp", "fr", "ru", "multi", "model", "tool", "s2orc", "bib"]
 class Schema:
-    def __init__(self, schema_path = None, schema = None, schema_name = None, version = "3.0"):
+    def __init__(self, schema_path = None, schema = None, schema_name = None, version = "3.0", keys_to_remove = []):
         self.schema_name = schema_name
         self.version = version
 
         if schema_name in SCHEMA_NAMES:
             with open(f"schema/{schema_name}.json") as f:
                 self.schema = json.load(f)
-
-            self.guidelines = self.process_guidelines(schema_name = schema_name)
-
             if version == "3.0":
-                # print(self.schema)
                 self.schema = self.mole_to_slot()
             elif version == "2.0":
                 self.schema = self.mole_to_mextract()
@@ -30,8 +25,16 @@ class Schema:
             self.schema = schema
         else:
             raise ValueError("Either schema_name or schema_path must be provided")
-        
-        self.guidelines = self.process_guidelines(schema_name = schema_name)
+        if schema_name is not None:
+            all_keys = list(self.schema.keys())
+            for key in all_keys:
+                if key in ['Subsets']:
+                    del self.schema[key]
+                # if key in ['Subsets', 'License', 'Dialect', 'Host', 'Tasks'] or key in keys_to_remove:
+                #     del self.schema[key]
+                # if key not in ['Name', 'Link', 'Volume', 'Unit', 'Paper_Title', 'Authors', 'Affiliations']:
+                #     del self.schema[key]
+                pass
 
     def get_schema_name(self):
         return self.schema_name
@@ -51,7 +54,7 @@ class Schema:
         return self.schema
     
     def dump_schema(self):
-        return json.dumps(self.schema, indent=4)
+        return json.dumps(self.schema, separators=(',', ':'))
     
     def get_prompt(self, paper_text, readme = "", metadata = ""):
         if not isinstance(self.schema, str):
@@ -63,31 +66,15 @@ class Schema:
                     Given the following Input schema: {schema}, then update the metadata in the Input schema with the information from the readme.
                     """
         else:  
-            prompt = f"""Input Schema: {schema}
-                        Paper Text: {paper_text}
-                    """
+            prompt = f"""
+            Paper Text: {paper_text}
+            """
         return prompt
             
     def get_prompts(self, paper_text, readme, metadata):
         prompt = self.get_prompt(paper_text, readme, metadata) 
         system_prompt = self.get_system_prompt() 
         return prompt, system_prompt 
-    
-    def process_guidelines(self, schema_name = None):
-        guidelines = {}
-        if schema_name is not None:
-            for g in open(f"guidelines/{schema_name}.md").read().split("\n")[2:]:                
-                value = g.split("**")[-1].replace(":", "").strip()
-                key = g.split("**")[1]
-                guidelines[key] = value
-        else:
-            if self.version == "3.0":
-                for key in self.schema.keys():
-                    guidelines[key] = self.schema[key]['description']
-            else:
-                for key in self.schema.keys():
-                    guidelines[key] = self.schema[key]['question']
-        return guidelines
 
     def schema_to_template(self):
         # https://github.com/numindai/nuextract/tree/main
@@ -154,14 +141,15 @@ class Schema:
             "date[year]": "integer",
             "bool": "boolean"
         }
-        descriptions = self.guidelines
         properties = {}
         for key in self.schema.keys():
             type = self.schema[key]['answer_type']
+            desc = self.schema[key]['question']
                 
             if type == 'List[str]':
                 properties[key] = {
                     "type": "array",
+                    "description": desc,
                     "items": {
                         "type": "string"
                     }
@@ -171,6 +159,7 @@ class Schema:
                 columns = [column.strip() for column in columns]
                 object_type = {
                     "type": "array",
+                    "description": desc,
                     "items": {
                         "type": "object",
                         "properties": {}
@@ -182,16 +171,19 @@ class Schema:
                         if column_type == 'List[str]':
                             object_type["items"]["properties"][column] = { # don't allow complex data types inside objects, this is a result of ill-defined Lanuage in the MultiSchema.
                                 "type": "string",
+                                "description": self.schema[column]['question']
                             }
                         else:
                             object_type["items"]["properties"][column] = {
-                                "type": type_mapper[column_type]
+                                "type": type_mapper[column_type],
+                                "description": self.schema[column]['question']
                             }
 
                 properties[key] = object_type
             else:
                 properties[key] = {
-                    "type": type_mapper[type]
+                    "type": type_mapper[type],
+                    "description": desc
                 }
             
             if 'options' in self.schema[key]:
@@ -199,8 +191,7 @@ class Schema:
                     properties[key]["items"]["enum"] = self.schema[key]['options']
                 else:
                     properties[key]["enum"] = self.schema[key]['options']
-            if key in descriptions:
-                properties[key]["description"] = descriptions[key]          
+            
         return properties
     
     
@@ -272,8 +263,11 @@ class Schema:
 
     def get_formatted_guidelines(self):
         formatted_guidelines = ""
-        for i, key in enumerate(self.guidelines):
-            formatted_guidelines += f"{i+1}. **{key}**: {self.guidelines[key]}\n"
+        for i, key in enumerate(self.schema):
+            if self.version == "3.0":
+                formatted_guidelines += f"{i+1}. **{key}**: {self.schema[key]['description']}\n"
+            else:
+                formatted_guidelines += f"{i+1}. **{key}**: {self.schema[key]['question']}\n"
         return formatted_guidelines
 
     def get_system_prompt(self):
@@ -302,9 +296,11 @@ class Schema:
                 The 'Output JSON' is a JSON that can be parsed using Python `json.load()`. USE double quotes "" not single quotes '' for the keys and values.
                 The 'Output JSON' must have ONLY the keys in the 'Input Schema'.
             """
-        if self.version == "2.0":
-            system_prompt += "Use the following guidelines to extract the answer from the 'Paper Text':\n\n"
-            system_prompt += self.get_formatted_guidelines()
+        # system_prompt += "Use the following guidelines to extract the answer from the 'Paper Text':\n\n"
+        # system_prompt += self.get_formatted_guidelines()
+        schema = self.dump_schema()
+        
+        system_prompt += f"\nInput Schema: {schema}"
         return system_prompt
         
     def evaluate_length(self, metadata):
@@ -333,18 +329,24 @@ class Schema:
         return metadata
     
     def evaluate(self, metadata, gold_metadata, return_metrics_only = False, return_precision_only = False, exact_match = False):
-        metadata = self.validate(metadata)
+        metadata = self.validate(metadata.copy())
         results = {}
-        # print(self.get_attributes())
+        annotations_from_paper = gold_metadata['annotations_from_paper']
+        annotated_attributes = [key for key in self.get_attributes() if key in annotations_from_paper and annotations_from_paper[key]]
+        adjusted_annotated_attributes = annotated_attributes.copy()
         for key in self.get_attributes():
             results[key] = self.match_attributes(key, gold_metadata[key], metadata[key], exact_match = exact_match)
-
+            if self.get_default(key) == gold_metadata[key]:
+                if key in adjusted_annotated_attributes:
+                    adjusted_annotated_attributes.remove(key)
+        
         precision = sum(results.values()) / len(results)
         if return_precision_only:
             return {'precision': precision}
-        annotations_from_paper = gold_metadata['annotations_from_paper']
-        annotated_attributes = [key for key in self.get_attributes() if key in annotations_from_paper and annotations_from_paper[key]]
-        recall = sum([value for key, value in results.items() if key in annotated_attributes]) / len(annotated_attributes)
+        
+        recall = sum([value for key, value in results.items() if key in annotated_attributes]) / len(annotated_attributes) if len(annotated_attributes) > 0 else 0
+        adjusted_recall = sum([value for key, value in results.items() if key in adjusted_annotated_attributes]) / len(adjusted_annotated_attributes) if len(adjusted_annotated_attributes) > 0 else 0
+
         if precision + recall == 0:
             f1 = 0
         else:
@@ -354,8 +356,9 @@ class Schema:
         results['recall'] = recall
         results['f1'] = f1
         results['length'] = length
+        results['adj_recall'] = adjusted_recall
         if return_metrics_only:
-            return {'precision': precision, 'recall': recall, 'f1': f1, 'length': length}
+            return {'precision': precision, 'recall': recall, 'f1': f1, 'length': length, 'adj_recall': adjusted_recall}
         return results
 
     def match_attributes(self, key, attr1, attr2, exact_match = False):
