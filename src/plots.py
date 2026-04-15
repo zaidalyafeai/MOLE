@@ -4,7 +4,7 @@ import json
 import argparse
 import numpy as np
 from plot_utils import print_table
-from utils import get_metadata_from_path, get_id_from_path, get_schema_from_path, create_hash
+from utils import get_metadata_from_path, get_id_from_path, get_schema_from_path, create_hash, read_json
 import os
 from constants import *
 from tqdm import tqdm
@@ -290,12 +290,21 @@ def extract_results(json_file, headers):
     results = json.load(open(json_file))
     model_name = results["config"]["model_name"]
     schema_name = results["config"]["schema_name"]
+    error = results["error"]
     if results["config"]["browse_web"]:
         model_name += " (Browsing)"
     schema = Schema(schema_name = schema_name)
-    pred_metadata = results["metadata"]
-    gold_metadata = get_metadata_from_path(json_file, eval_path = args.eval_path)
-    scores = schema.evaluate(pred_metadata, gold_metadata, exact_match = args.use_exact_match)
+    metadata = results["metadata"]
+    if error is None:
+        if isinstance(metadata, str):
+            pred_metadata = read_json(metadata)
+        else:
+            pred_metadata = metadata
+        gold_metadata = get_metadata_from_path(json_file, eval_path = args.eval_path)
+        scores = schema.evaluate(pred_metadata, gold_metadata, exact_match = args.use_exact_match)
+    else:
+        scores = {"f1": 0 , "precision": 0, "recall": 0}
+
     if args.group_by_x == "category":
         if args.penalize_errors and results["error"] is not None:
             output[schema_name].append(0)
